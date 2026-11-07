@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "id": "rconnect.panel",
   "name": "Phone (rust-connect)",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": "tudisco",
   "license": "MIT",
   "description": "KDE Connect phone integration in the Omarchy bar, driven by the rust-connect daemon: pairing, battery, ring, ping, and sending files or the clipboard.",
