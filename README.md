@@ -31,7 +31,7 @@ daemon itself.
 ## Install
 
 ```sh
-omarchy plugin add https://github.com/OWNER/REPO.git --enable
+omarchy plugin add https://github.com/tudisco/omarchy-rust-connect.git --enable
 ```
 
 Then open KDE Connect on your phone (same network), pick this computer,
