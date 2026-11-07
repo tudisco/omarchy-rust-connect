@@ -8,11 +8,13 @@ your phone.
 - Phone icon and battery level in the bar (highlighted for a pairing request or low battery)
 - Pairing requests with the verification code and Accept/Decline, plus a desktop notification
 - Ring the phone, ping it, send files (desktop file chooser), send the clipboard
+- Phone notifications in the panel: dismiss (also on the phone), clear all, and reply where the app supports it
 - Device list with Pair/Unpair
 - On/off switch for the rust-connect service
 
-Clipboard sync, phone notifications and received files are handled by the
-daemon itself.
+Clipboard sync, desktop popups for phone notifications, and received files
+are handled by the daemon itself. To stop notifications from a phone app,
+turn them off per app in the KDE Connect app's notification sync settings.
 
 ## Requirements
 
@@ -55,6 +57,7 @@ omarchy-shell rconnect.panel ring
 omarchy-shell rconnect.panel sendFiles
 omarchy-shell rconnect.panel sendClipboard
 omarchy-shell rconnect.panel status
+omarchy-shell rconnect.panel notifications   # how many are listed
 ```
 
 `bin/rconnect-api` is the small client the panel uses. It also works on its
@@ -79,6 +82,9 @@ omarchy plugin enable rconnect.panel
 node tests/model.test.mjs
 omarchy plugin validate .
 ```
+
+The shell only hot-reloads plugin folders that live inside `~/.config`. With
+the symlink above, run `omarchy restart shell` after editing.
 
 ## License
 

@@ -22,6 +22,7 @@ Item {
   property bool serviceKnown: false      // the unit file exists
   property var devices: []
   property var batteries: ({})           // id -> {charge, charging}
+  property var notifications: []         // newest first, see Model.normalizeNotification
   property string lastError: ""
   property string actionStatus: ""
   property int pendingActions: 0
@@ -54,11 +55,13 @@ Item {
     _pendingEvent = ""
     if (!streamUp) { streamUp = true; _backoff = 2000; lastError = "" }
 
-    if (r.name === "snapshot") { applyDevices(r.data); return }
-    if (r.name === "lagged") { refreshDevices(); return }
+    if (r.name === "snapshot") { applyDevices(r.data); loadNotifications(); return }
+    if (r.name === "lagged") { refreshDevices(); loadNotifications(); return }
 
     var kind = String(r.data && r.data.kind || "")
-    if (kind === "plugin.battery") {
+    if (kind === "plugin.notification") {
+      notifications = Model.applyNotification(notifications, Model.normalizeNotification(r.data))
+    } else if (kind === "plugin.battery") {
       setBattery(String(r.data.device_id || ""), r.data.current_charge, r.data.is_charging)
     } else if (kind.indexOf("device.") === 0) {
       deviceRefreshDebounce.restart()
@@ -110,10 +113,13 @@ Item {
     Process {
       id: proc
       property var onDone: null
+      property string stdinText: ""
       property string _out: ""
       property string _err: ""
       stdout: StdioCollector { id: so; waitForEnd: true; onStreamFinished: proc._out = text }
       stderr: StdioCollector { id: se; waitForEnd: true; onStreamFinished: proc._err = text }
+      stdinEnabled: stdinText !== ""
+      onStarted: if (proc.stdinText !== "") proc.write(proc.stdinText + "\n")
       onExited: function(code) {
         var out = String(so.text || proc._out || "")
         var err = String(se.text || proc._err || "")
@@ -124,10 +130,11 @@ Item {
   }
 
   // call(["get", "/api/v1/devices"], function(ok, data, error) {...}, tracked)
-  function call(args, cb, tracked) {
+  function call(args, cb, tracked, stdinText) {
     if (tracked) pendingActions += 1
     var p = callComponent.createObject(root, {
       command: ["bash", helper].concat(args),
+      stdinText: stdinText || "",
       onDone: function(code, out, err) {
         if (tracked) pendingActions = Math.max(0, pendingActions - 1)
         var u = Model.unwrap(out)
@@ -159,6 +166,35 @@ Item {
       if (ok) applyDevices({ data: data })
       else lastError = error
     }, false)
+  }
+
+  function loadNotifications() {
+    call(["get", "/api/v1/notifications?limit=" + Model.MAX_NOTIFICATIONS], function(ok, data) {
+      if (ok) notifications = Model.normalizeNotifications(data)
+    }, false)
+  }
+
+  // Dismiss here and on the phone. Optimistic: the daemon also broadcasts a
+  // cancel event, which is a no-op once the row is gone.
+  function dismissNotification(n) {
+    if (!n) return
+    notifications = Model.removeNotification(notifications, n.key)
+    call(["post", "/api/v1/devices/" + enc(n.deviceId) + "/notification/" + enc(n.id) + "/dismiss"],
+      function(ok, data, error) { if (!ok) flash(error) }, false)
+  }
+
+  function clearNotifications() {
+    var all = notifications
+    for (var i = 0; i < all.length; i++) dismissNotification(all[i])
+  }
+
+  // The reply text goes through stdin, never argv.
+  function replyNotification(n, message) {
+    var text = String(message || "").trim()
+    if (!n || text === "") return
+    call(["post-stdin", "/api/v1/devices/" + enc(n.deviceId) + "/notification/" + enc(n.id) + "/reply"],
+      function(ok, data, error) { flash(ok ? "Reply sent" : error) }, true,
+      JSON.stringify({ message: text }))
   }
 
   function requestBattery(id) {

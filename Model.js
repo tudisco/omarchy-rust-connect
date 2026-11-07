@@ -19,7 +19,11 @@ var GLYPH = {
   sendClipboard: glyph(0xF0147),// clipboard-arrow-right
   pair: glyph(0xF0339),         // link
   unpair: glyph(0xF0337),       // link-off
-  refresh: glyph(0xF0450)
+  refresh: glyph(0xF0450),
+  clearAll: glyph(0xF0234),     // notification-clear-all
+  reply: glyph(0xF0167),
+  close: glyph(0xF0156),
+  send: glyph(0xF048A)
 }
 
 function deviceGlyph(type) {
@@ -155,4 +159,80 @@ function errorText(stdout, stderr, fallback) {
   if (e.indexOf("Connection refused") !== -1 || e.indexOf("Couldn't connect") !== -1) return "rust-connect is not running"
   if (e !== "") return e.split("\n")[0].replace(/^curl: \(\d+\) /, "")
   return fallback || "Request failed"
+}
+
+// ---- phone notifications ---------------------------------------------------
+// History entries from GET /api/v1/notifications are camelCase; SSE
+// plugin.notification events are snake_case. Accept both. Strings are
+// clamped: this is phone-controlled text.
+
+var MAX_NOTIFICATIONS = 50
+
+function clampText(v, n) {
+  var s = String(v === undefined || v === null ? "" : v)
+  return s.length > n ? s.substring(0, n - 1) + "…" : s
+}
+
+function pick(o, camel, snake) {
+  if (!o) return undefined
+  return o[camel] !== undefined ? o[camel] : o[snake]
+}
+
+function normalizeNotification(o) {
+  if (!o) return null
+  var id = String(pick(o, "id", "id") || "")
+  var deviceId = String(pick(o, "deviceId", "device_id") || "")
+  if (!id || !deviceId) return null
+  var app = clampText(pick(o, "appName", "app_name"), 60)
+  var title = clampText(pick(o, "title", "title"), 120)
+  var replyId = pick(o, "replyId", "reply_id")
+  var received = Date.parse(String(pick(o, "receivedAt", "received_at") || ""))
+  return {
+    key: deviceId + "\n" + id,
+    deviceId: deviceId,
+    id: id,
+    app: app,
+    title: title || app,
+    text: clampText(pick(o, "text", "text"), 600),
+    canReply: !!replyId,
+    cancel: pick(o, "isCancel", "is_cancel") === true,
+    receivedAt: isFinite(received) ? received : Date.now()
+  }
+}
+
+// Newest first. History arrives oldest-first from the daemon (or newest-first
+// with ?page); sort so either works.
+function normalizeNotifications(data) {
+  var src = data && data.notifications ? data.notifications : (data instanceof Array ? data : [])
+  var out = []
+  var seen = {}
+  for (var i = 0; i < src.length; i++) {
+    var n = normalizeNotification(src[i])
+    if (!n || n.cancel || seen[n.key]) continue
+    seen[n.key] = true
+    out.push(n)
+  }
+  out.sort(function(a, b) { return b.receivedAt - a.receivedAt })
+  return out.slice(0, MAX_NOTIFICATIONS)
+}
+
+// Apply one event: a cancel removes, anything else replaces-or-prepends.
+function applyNotification(list, n) {
+  if (!n) return list
+  var out = (list || []).filter(function(x) { return x.key !== n.key })
+  if (n.cancel) return out
+  out.unshift(n)
+  return out.slice(0, MAX_NOTIFICATIONS)
+}
+
+function removeNotification(list, key) {
+  return (list || []).filter(function(x) { return x.key !== key })
+}
+
+function timeAgo(ms, now) {
+  var s = Math.max(0, Math.round(((now || Date.now()) - ms) / 1000))
+  if (s < 60) return "now"
+  if (s < 3600) return Math.floor(s / 60) + "m"
+  if (s < 86400) return Math.floor(s / 3600) + "h"
+  return Math.floor(s / 86400) + "d"
 }

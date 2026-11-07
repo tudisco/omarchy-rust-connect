@@ -9,6 +9,7 @@
 #   rconnect-api events                    # SSE stream, one line per line
 #   rconnect-api get    /api/v1/devices
 #   rconnect-api post   /api/v1/ping '{"device_id":"…"}'
+#   rconnect-api post-stdin <path>         # JSON body read from stdin (private text)
 #   rconnect-api delete /api/v1/devices/<id>/unpair
 #   rconnect-api send-file <device-id> <file>...
 #   rconnect-api send-clipboard <device-id>
@@ -74,6 +75,12 @@ case $cmd in
     path=$1
     body=${2:-'{}'}
     api POST "$path" -H 'Content-Type: application/json' --data-binary "$body"
+    ;;
+  post-stdin)
+    # For bodies that shouldn't show up in `ps` (notification replies).
+    # One line of JSON: callers needn't close stdin.
+    IFS= read -r body || [[ -n ${body:-} ]] || die USAGE "post-stdin: no body on stdin"
+    printf '%s' "$body" | api POST "$1" -H 'Content-Type: application/json' --data-binary @-
     ;;
   send-file)
     device=$1

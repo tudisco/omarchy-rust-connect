@@ -5,6 +5,7 @@ import Quickshell
 import qs.Commons
 import qs.Commons as Commons
 import qs.Ui
+import qs.Ui as OUi
 import "Model.js" as Model
 
 Panel {
@@ -32,6 +33,17 @@ Panel {
     return "No phone connected"
   }
 
+  property double now: Date.now()
+  property string replyKey: ""        // notification whose reply box is open
+
+  Timer {
+    interval: 30000
+    repeat: true
+    running: root.opened
+    triggeredOnStart: true
+    onTriggered: root.now = Date.now()
+  }
+
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
@@ -57,6 +69,7 @@ Panel {
     function ring(): string { if (!root.primary) return "no device"; phone.ring(root.primary.id); return "ok" }
     function sendClipboard(): string { if (!root.primary) return "no device"; phone.sendClipboard(root.primary.id); return "ok" }
     function sendFiles(): string { if (!root.primary) return "no device"; phone.sendFiles(root.primary.id); return "ok" }
+    function notifications(): string { return String(phone.notifications.length) }
     function status(): string {
       if (!phone.streamUp) return "offline"
       return root.primary ? root.primary.name + ": " + Model.stateText(root.primary, phone.primaryBattery) : "no device"
@@ -190,6 +203,42 @@ Panel {
             ActionChip { glyph: Model.GLYPH.ping; label: "Ping"; onActivated: phone.ping(root.primary.id) }
           }
 
+          // Phone notifications ------------------------------------------
+          PanelSeparator { visible: phone.notifications.length > 0; foreground: root.foreground }
+
+          Column {
+            id: notificationColumn
+            visible: phone.notifications.length > 0
+            width: parent.width
+            spacing: Style.space(6)
+
+            RowLayout {
+              width: parent.width
+              PanelSectionHeader {
+                Layout.fillWidth: true
+                text: "Notifications"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+              }
+              PanelActionButton {
+                iconText: Model.GLYPH.clearAll
+                tooltipText: "Clear all (also on the phone)"
+                foreground: root.foreground
+                fontFamily: root.fontFamily
+                onClicked: { root.replyKey = ""; phone.clearNotifications() }
+              }
+            }
+
+            Repeater {
+              model: phone.notifications
+              NotificationRow {
+                required property var modelData
+                width: notificationColumn.width
+                note: modelData
+              }
+            }
+          }
+
           PanelSeparator { visible: phone.devices.length > 0; foreground: root.foreground }
 
           Column {
@@ -303,6 +352,97 @@ Panel {
         Item { Layout.fillWidth: true }
         ActionChip { glyph: Model.GLYPH.unpair; label: "Decline"; onActivated: phone.rejectPair(card.device.id) }
         ActionChip { glyph: Model.GLYPH.pair; label: "Accept"; onActivated: phone.acceptPair(card.device.id) }
+      }
+    }
+  }
+
+  component NotificationRow: CursorSurface {
+    id: nrow
+    property var note: null
+    readonly property bool replying: note !== null && root.replyKey === note.key
+    foreground: root.foreground
+    hasCursor: nMouse.containsMouse
+    implicitHeight: nCol.implicitHeight + Style.space(14)
+
+    MouseArea { id: nMouse; anchors.fill: parent; hoverEnabled: true; acceptedButtons: Qt.NoButton }
+
+    ColumnLayout {
+      id: nCol
+      anchors.left: parent.left
+      anchors.right: parent.right
+      anchors.verticalCenter: parent.verticalCenter
+      anchors.leftMargin: Style.space(10)
+      anchors.rightMargin: Style.space(6)
+      spacing: Style.space(2)
+
+      RowLayout {
+        Layout.fillWidth: true
+        spacing: Style.space(6)
+        PlainLabel {
+          Layout.fillWidth: true
+          elide: Text.ElideRight
+          color: root.dim
+          font.pixelSize: Style.font.caption
+          text: nrow.note ? nrow.note.app + " · " + Model.timeAgo(nrow.note.receivedAt, root.now) : ""
+        }
+        PanelActionButton {
+          visible: nrow.note && nrow.note.canReply
+          iconText: Model.GLYPH.reply
+          tooltipText: "Reply"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onClicked: root.replyKey = nrow.replying ? "" : nrow.note.key
+        }
+        PanelActionButton {
+          iconText: Model.GLYPH.close
+          tooltipText: "Dismiss (also on the phone)"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onClicked: { if (nrow.replying) root.replyKey = ""; phone.dismissNotification(nrow.note) }
+        }
+      }
+      PlainLabel {
+        Layout.fillWidth: true
+        elide: Text.ElideRight
+        text: nrow.note ? nrow.note.title : ""
+      }
+      PlainLabel {
+        visible: text !== ""
+        Layout.fillWidth: true
+        wrapMode: Text.Wrap
+        maximumLineCount: 3
+        elide: Text.ElideRight
+        color: root.dim
+        font.pixelSize: Style.font.bodySmall
+        text: nrow.note ? nrow.note.text : ""
+      }
+      RowLayout {
+        visible: nrow.replying
+        Layout.fillWidth: true
+        Layout.topMargin: Style.space(4)
+        spacing: Style.space(6)
+        OUi.TextField {
+          id: replyField
+          Layout.fillWidth: true
+          placeholderText: "Reply…"
+          foreground: root.foreground
+          onVisibleChanged: if (visible) { text = ""; forceActiveFocus() }
+          onAccepted: send()
+          Keys.onEscapePressed: root.replyKey = ""
+          function send() {
+            if (text.trim() === "") return
+            phone.replyNotification(nrow.note, text)
+            text = ""
+            root.replyKey = ""
+          }
+        }
+        PanelActionButton {
+          iconText: Model.GLYPH.send
+          tooltipText: "Send"
+          foreground: root.foreground
+          fontFamily: root.fontFamily
+          onClicked: replyField.send()
+        }
       }
     }
   }
