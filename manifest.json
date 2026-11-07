@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "id": "rconnect.panel",
+  "name": "Phone (rust-connect)",
+  "version": "0.1.0",
+  "author": "tudisco",
+  "license": "MIT",
+  "description": "KDE Connect phone integration in the Omarchy bar, driven by the rust-connect daemon: pairing, battery, ring, ping, and sending files or the clipboard.",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Phone",
+    "description": "Paired phones, battery, pairing requests, and quick actions through rust-connect.",
+    "category": "Status",
+    "allowMultiple": false,
+    "defaultSection": "right",
+    "defaults": {
+      "showBattery": true,
+      "notifyPairRequests": true
+    },
+    "schema": [
+      {
+        "key": "showBattery",
+        "type": "boolean",
+        "label": "Show phone battery in the bar",
+        "defaultValue": true
+      },
+      {
+        "key": "notifyPairRequests",
+        "type": "boolean",
+        "label": "Desktop notification for pairing requests",
+        "defaultValue": true
+      }
+    ]
+  }
+}

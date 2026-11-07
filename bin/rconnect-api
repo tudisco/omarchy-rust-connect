@@ -1,0 +1,103 @@
+#!/usr/bin/env bash
+# rconnect-api: small client for the rust-connect REST API.
+#
+# The Omarchy panel calls this for every request; it also works by hand and
+# from Hyprland binds. It keeps the API key out of argv (and so out of `ps`)
+# by handing curl the header through a process-substitution file.
+#
+#   rconnect-api health
+#   rconnect-api events                    # SSE stream, one line per line
+#   rconnect-api get    /api/v1/devices
+#   rconnect-api post   /api/v1/ping '{"device_id":"…"}'
+#   rconnect-api delete /api/v1/devices/<id>/unpair
+#   rconnect-api send-file <device-id> <file>...
+#   rconnect-api send-clipboard <device-id>
+#   rconnect-api send-pick <device-id>     # desktop file chooser, then send
+#
+# Environment:
+#   RCONNECT_API_URL       default http://127.0.0.1:9090
+#   RCONNECT_API_KEY_FILE  default ${XDG_DATA_HOME:-~/.local/share}/rust-connect/api_key
+
+set -euo pipefail
+
+API_URL="${RCONNECT_API_URL:-http://127.0.0.1:9090}"
+KEY_FILE="${RCONNECT_API_KEY_FILE:-${XDG_DATA_HOME:-$HOME/.local/share}/rust-connect/api_key}"
+
+die() {
+  # Same envelope shape rust-connect uses, so the panel parses one format.
+  jq -cn --arg code "$1" --arg message "$2" '{status:"error",error:{code:$code,message:$message}}'
+  exit "${3:-1}"
+}
+
+key_header() {
+  printf 'X-API-Key: %s\n' "$(tr -d '[:space:]' <"$KEY_FILE")"
+}
+
+require_key() {
+  [[ -r $KEY_FILE ]] || die NO_API_KEY "rust-connect API key not found at $KEY_FILE (has the daemon run once?)" 3
+}
+
+uri() { jq -rn --arg s "$1" '$s|@uri'; }
+
+api() { # api METHOD PATH [curl args...]
+  local method=$1 path=$2
+  shift 2
+  require_key
+  curl -sS --fail-with-body --connect-timeout 3 -X "$method" \
+    -H @<(key_header) "$@" "$API_URL$path"
+}
+
+send_file() { # send_file DEVICE FILE
+  local device=$1 file=$2
+  [[ -f $file ]] || die NOT_A_FILE "not a file: $file"
+  api POST "/api/v1/devices/$(uri "$device")/share/send?filename=$(uri "$(basename -- "$file")")" \
+    -H 'Content-Type: application/octet-stream' --data-binary @"$file"
+  echo
+}
+
+cmd=${1:-}
+shift || true
+
+case $cmd in
+  health)
+    curl -sS --fail-with-body --connect-timeout 2 "$API_URL/api/v1/health"
+    ;;
+  events)
+    require_key
+    # -N: no buffering, so each SSE line reaches the panel as it arrives.
+    exec curl -sS -N --fail --connect-timeout 3 -H @<(key_header) \
+      -H 'Accept: text/event-stream' "$API_URL/api/v1/events"
+    ;;
+  get) api GET "$1" ;;
+  delete) api DELETE "$1" ;;
+  post)
+    path=$1
+    body=${2:-'{}'}
+    api POST "$path" -H 'Content-Type: application/json' --data-binary "$body"
+    ;;
+  send-file)
+    device=$1
+    shift
+    [[ $# -gt 0 ]] || die USAGE "send-file <device-id> <file>..."
+    for f in "$@"; do send_file "$device" "$f"; done
+    ;;
+  send-clipboard)
+    device=$1
+    text=$(wl-paste --no-newline --type text 2>/dev/null || true)
+    [[ -n $text ]] || die EMPTY_CLIPBOARD "the clipboard has no text"
+    # Body goes through stdin, never argv: clipboard contents can be secret.
+    jq -cn --arg t "$text" '{text:$t}' |
+      api POST "/api/v1/devices/$(uri "$device")/share/text" \
+        -H 'Content-Type: application/json' --data-binary @-
+    ;;
+  send-pick)
+    device=$1
+    mapfile -t files < <(omarchy file select --multiple --title "Send to phone" 2>/dev/null || true)
+    [[ ${#files[@]} -gt 0 && -n ${files[0]} ]] || die CANCELLED "no file chosen" 4
+    for f in "${files[@]}"; do send_file "$device" "$f"; done
+    ;;
+  *)
+    sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'
+    exit 2
+    ;;
+esac
